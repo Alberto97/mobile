@@ -208,6 +208,10 @@
     <AndroidResource Include="Resources\drawable\splash_screen.xml" />
   </ItemGroup>
   <ItemGroup>
+    <ProjectReference Include="..\Android.Autofill\Android.Autofill.csproj">
+      <Project>{6207d5b2-ffdd-4263-9680-2751c65bf484}</Project>
+      <Name>Android.Autofill</Name>
+    </ProjectReference>
     <ProjectReference Include="..\App\App.csproj">
       <Project>{9F1742A7-7D03-4BB3-8FCD-41BC3002B00A}</Project>
       <Name>App</Name>
