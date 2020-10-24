@@ -9,6 +9,15 @@ using Bit.App.Resources;
 using Bit.Core.Enums;
 using Android.Views.Autofill;
 using Bit.Core.Abstractions;
+using Androidx.Autofill.Inline.V1;
+using Android.Graphics.Drawables;
+using Android.OS;
+using Android.App.Slices;
+using Android.Widget.Inline;
+using Android.Views.InputMethods;
+using Android.Util;
+using Android.Text;
+using Java.Lang;
 
 namespace Bit.Droid.Autofill
 {
@@ -132,14 +141,25 @@ namespace Bit.Droid.Autofill
             return new List<FilledItem>();
         }
 
-        public static FillResponse BuildFillResponse(Parser parser, List<FilledItem> items, bool locked)
+        public static FillResponse BuildFillResponse(Parser parser, List<FilledItem> items, bool locked, FillRequest request)
         {
             var responseBuilder = new FillResponse.Builder();
+            var listSize = 0;
             if (items != null && items.Count > 0)
             {
-                foreach (var item in items)
+                listSize = items.Count;
+                if (Build.VERSION.SdkInt > BuildVersionCodes.Q)
                 {
-                    var dataset = BuildDataset(parser.ApplicationContext, parser.FieldCollection, item);
+                    var inlineRequest = request.InlineSuggestionsRequest;
+                    // Check that the keyboard in use actually supports inline autofill
+                    if (inlineRequest != null && inlineRequest.InlinePresentationSpecs.Count > 0)
+                        // Account for the app entrypoint and discard extra suggestions
+                        listSize = Math.Min(inlineRequest.InlinePresentationSpecs.Count - 1, listSize);
+                }
+
+                for (var i = 0; i < listSize; i++)
+                {
+                    var dataset = BuildDataset(parser.ApplicationContext, parser.FieldCollection, items[i], request, i);
                     if (dataset != null)
                     {
                         responseBuilder.AddDataset(dataset);
@@ -147,16 +167,27 @@ namespace Bit.Droid.Autofill
                 }
             }
             responseBuilder.AddDataset(BuildVaultDataset(parser.ApplicationContext, parser.FieldCollection,
-                parser.Uri, locked));
+                parser.Uri, locked, request, listSize));
             AddSaveInfo(parser, responseBuilder, parser.FieldCollection);
             responseBuilder.SetIgnoredIds(parser.FieldCollection.IgnoreAutofillIds.ToArray());
             return responseBuilder.Build();
         }
 
-        public static Dataset BuildDataset(Context context, FieldCollection fields, FilledItem filledItem)
+        public static Dataset BuildDataset(Context context, FieldCollection fields, FilledItem filledItem,
+            FillRequest request = null, int index = 0)
         {
             var datasetBuilder = new Dataset.Builder(
                 BuildListView(filledItem.Name, filledItem.Subtitle, filledItem.Icon, context));
+
+            if (request != null && Build.VERSION.SdkInt > BuildVersionCodes.Q && request.InlineSuggestionsRequest != null)
+            {
+                var pendingIntent = PendingIntent.GetActivity(context, 0, new Intent(), PendingIntentFlags.CancelCurrent);
+                var inlinePresentation = BuildInlinePresentation(
+                    filledItem.Name, filledItem.Subtitle, filledItem.Icon, context,
+                    request.InlineSuggestionsRequest, index, pendingIntent);
+                datasetBuilder.SetInlinePresentation(inlinePresentation);
+            }
+
             if (filledItem.ApplyToFields(fields, datasetBuilder))
             {
                 return datasetBuilder.Build();
@@ -164,7 +195,8 @@ namespace Bit.Droid.Autofill
             return null;
         }
 
-        public static Dataset BuildVaultDataset(Context context, FieldCollection fields, string uri, bool locked)
+        public static Dataset BuildVaultDataset(Context context, FieldCollection fields, string uri, bool locked,
+            FillRequest request, int index)
         {
             var intent = new Intent(context, typeof(MainActivity));
             intent.PutExtra("autofillFramework", true);
@@ -197,12 +229,48 @@ namespace Bit.Droid.Autofill
             var datasetBuilder = new Dataset.Builder(view);
             datasetBuilder.SetAuthentication(pendingIntent.IntentSender);
 
+            if (Build.VERSION.SdkInt > BuildVersionCodes.Q && request.InlineSuggestionsRequest != null)
+            {
+                var inlinePresentation = BuildInlinePresentation(
+                    AppResources.AutofillWithBitwarden,
+                    null,
+                    Resource.Drawable.shield,
+                    context,
+                    request.InlineSuggestionsRequest, index, pendingIntent);
+                datasetBuilder.SetInlinePresentation(inlinePresentation);
+            }
+
             // Dataset must have a value set. We will reset this in the main activity when the real item is chosen.
             foreach (var autofillId in fields.AutofillIds)
             {
                 datasetBuilder.SetValue(autofillId, AutofillValue.ForText("PLACEHOLDER"));
             }
             return datasetBuilder.Build();
+        }
+
+        public static InlinePresentation BuildInlinePresentation(string text, string subtext, int iconId,
+            Context context, InlineSuggestionsRequest inlineRequest, int index, PendingIntent pendingIntent)
+        {
+            var slice = BuildSlice(text, subtext, iconId, context, pendingIntent);
+            var spec = inlineRequest.InlinePresentationSpecs[index];
+            return new InlinePresentation(slice, spec, false);
+        }
+
+        public static Slice BuildSlice(string text, string subtext, int iconId, Context context, PendingIntent pendingIntent)
+        {
+            var icon = Icon.CreateWithResource(context, iconId);
+            var builder = InlineSuggestionUi.NewContentBuilder(pendingIntent);
+
+            if (!TextUtils.IsEmpty(text))
+                builder.SetTitle(text);
+
+            if (!TextUtils.IsEmpty(subtext))
+                builder.SetSubtitle(subtext);
+
+            if (icon != null)
+                builder.SetStartIcon(icon);
+
+            return builder.Build().Slice;
         }
 
         public static RemoteViews BuildListView(string text, string subtext, int iconId, Context context)
