@@ -18,6 +18,7 @@ using Android.Views.InputMethods;
 using Android.Util;
 using Android.Text;
 using Java.Lang;
+using Android.Net;
 
 namespace Bit.Droid.Autofill
 {
@@ -181,10 +182,9 @@ namespace Bit.Droid.Autofill
 
             if (request != null && Build.VERSION.SdkInt > BuildVersionCodes.Q && request.InlineSuggestionsRequest != null)
             {
-                var pendingIntent = PendingIntent.GetActivity(context, 0, new Intent(), PendingIntentFlags.CancelCurrent);
                 var inlinePresentation = BuildInlinePresentation(
                     filledItem.Name, filledItem.Subtitle, filledItem.Icon, context,
-                    request.InlineSuggestionsRequest, index, pendingIntent);
+                    request.InlineSuggestionsRequest, index);
                 datasetBuilder.SetInlinePresentation(inlinePresentation);
             }
 
@@ -236,7 +236,7 @@ namespace Bit.Droid.Autofill
                     null,
                     Resource.Drawable.shield,
                     context,
-                    request.InlineSuggestionsRequest, index, pendingIntent);
+                    request.InlineSuggestionsRequest, index);
                 datasetBuilder.SetInlinePresentation(inlinePresentation);
             }
 
@@ -248,10 +248,18 @@ namespace Bit.Droid.Autofill
             return datasetBuilder.Build();
         }
 
-        public static InlinePresentation BuildInlinePresentation(string text, string subtext, int iconId,
-            Context context, InlineSuggestionsRequest inlineRequest, int index, PendingIntent pendingIntent)
+        public static PendingIntent BuildAttributionIntent(Context context)
         {
-            var slice = BuildSlice(text, subtext, iconId, context, pendingIntent);
+            var intent = new Intent(Android.Provider.Settings.ActionApplicationDetailsSettings);
+            intent.SetData(Uri.Parse($"package:{context.PackageName}"));
+            return PendingIntent.GetActivity(context, 0, intent, 0);
+        }
+
+        public static InlinePresentation BuildInlinePresentation(string text, string subtext, int iconId,
+            Context context, InlineSuggestionsRequest inlineRequest, int index)
+        {
+            var attribution = BuildAttributionIntent(context);
+            var slice = BuildSlice(text, subtext, iconId, context, attribution);
             var spec = inlineRequest.InlinePresentationSpecs[index];
             return new InlinePresentation(slice, spec, false);
         }
